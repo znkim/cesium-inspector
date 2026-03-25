@@ -5,6 +5,7 @@ import LayerStatusPanel from './components/LayerStatusPanel';
 import type { AppInputs, LoadedLayerInfo, ResourceKind } from './types/resources';
 import { defaultInputs, loadInputs, saveInputs } from './lib/storage';
 import { CesiumManager } from './lib/cesiumManager';
+import { getDisplayLayerName } from './lib/layerNaming';
 
 interface LoadingMap {
   terrain: boolean;
@@ -67,11 +68,12 @@ export default function App() {
 
     const active = manager.active;
     const layers: LoadedLayerInfo[] = [];
+    const fallbackIndex = { terrain: 1, tileset: 1, imagery: 1 };
 
     if (active.terrainUrl) {
       layers.push({
         kind: 'terrain',
-        name: inputs.terrain.name?.trim() || 'Terrain',
+        name: getDisplayLayerName('terrain', inputs.terrain, active.terrainUrl, fallbackIndex.terrain++),
         description: inputs.terrain.description,
         url: active.terrainUrl,
       });
@@ -79,7 +81,7 @@ export default function App() {
     if (active.tilesetUrl) {
       layers.push({
         kind: 'tileset',
-        name: inputs.tileset.name?.trim() || '3D Tiles',
+        name: getDisplayLayerName('tileset', inputs.tileset, active.tilesetUrl, fallbackIndex.tileset++),
         description: inputs.tileset.description,
         url: active.tilesetUrl,
       });
@@ -87,7 +89,7 @@ export default function App() {
     if (active.imageryUrl) {
       layers.push({
         kind: 'imagery',
-        name: inputs.imagery.name?.trim() || 'Imagery',
+        name: getDisplayLayerName('imagery', inputs.imagery, active.imageryUrl, fallbackIndex.imagery++),
         description: inputs.imagery.description,
         url: active.imageryUrl,
       });
@@ -227,11 +229,11 @@ export default function App() {
           onRemove={() => removeByKind('imagery')}
         />
 
-        <LayerStatusPanel layers={loadedLayers} />
       </aside>
 
       <section className="viewer-wrap">
         <ViewerContainer onReady={handleViewerReady} />
+        <LayerStatusPanel layers={loadedLayers} />
       </section>
     </main>
   );

@@ -2,18 +2,31 @@ import { useEffect, useRef } from 'react';
 import { CesiumManager } from '../lib/cesiumManager';
 
 interface ViewerContainerProps {
-  onReady: (manager: CesiumManager) => void;
+  onReady: (manager: CesiumManager | null) => void;
 }
 
 export default function ViewerContainer({ onReady }: ViewerContainerProps) {
-  const viewerRef = useRef<HTMLDivElement | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const managerRef = useRef<CesiumManager | null>(null);
+  const onReadyRef = useRef(onReady);
 
   useEffect(() => {
-    if (!viewerRef.current) return;
-
-    const manager = new CesiumManager(viewerRef.current);
-    onReady(manager);
+    onReadyRef.current = onReady;
   }, [onReady]);
 
-  return <div ref={viewerRef} className="viewer" />;
+  useEffect(() => {
+    if (!containerRef.current || managerRef.current) return;
+
+    const manager = new CesiumManager(containerRef.current);
+    managerRef.current = manager;
+    onReadyRef.current(manager);
+
+    return () => {
+      managerRef.current?.destroy();
+      managerRef.current = null;
+      onReadyRef.current(null);
+    };
+  }, []);
+
+  return <div ref={containerRef} className="viewer" />;
 }

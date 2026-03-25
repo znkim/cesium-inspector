@@ -9,8 +9,6 @@ import {
   type ImageryProvider,
 } from 'cesium';
 
-let singletonViewer: Viewer | null = null;
-
 function normalizeUrl(url: string): string {
   return url.trim();
 }
@@ -76,14 +74,6 @@ export class CesiumManager {
   private imageryLayer: ImageryLayer | null = null;
 
   constructor(container: HTMLDivElement) {
-    if (singletonViewer) {
-      this.viewer = singletonViewer;
-      if (!container.contains(this.viewer.container)) {
-        container.append(this.viewer.container);
-      }
-      return;
-    }
-
     this.viewer = new Viewer(container, {
       animation: false,
       timeline: false,
@@ -97,8 +87,6 @@ export class CesiumManager {
       fullscreenButton: false,
       shouldAnimate: true,
     });
-
-    singletonViewer = this.viewer;
   }
 
   get active(): ActiveResources {
@@ -176,5 +164,10 @@ export class CesiumManager {
     this.removeTileset();
     this.removeImagery();
     this.removeTerrain();
+  }
+
+  destroy(): void {
+    this.clearAll();
+    this.viewer.destroy();
   }
 }

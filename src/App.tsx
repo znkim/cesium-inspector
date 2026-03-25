@@ -38,6 +38,10 @@ const sampleInputs: AppInputs = {
 
 export default function App() {
   const [manager, setManager] = useState<CesiumManager | null>(null);
+
+  const handleViewerReady = useCallback((nextManager: CesiumManager | null) => {
+    setManager(nextManager);
+  }, []);
   const [inputs, setInputs] = useState<AppInputs>(defaultInputs);
   const [loading, setLoading] = useState<LoadingMap>({
     terrain: false,
@@ -227,7 +231,7 @@ export default function App() {
       </aside>
 
       <section className="viewer-wrap">
-        <ViewerContainer onReady={setManager} />
+        <ViewerContainer onReady={handleViewerReady} />
       </section>
     </main>
   );

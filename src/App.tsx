@@ -42,24 +42,6 @@ interface ErrorMap {
   imagery?: string;
 }
 
-const sampleInputs: AppInputs = {
-  terrain: {
-    url: 'https://assets.agi.com/stk-terrain/world',
-    name: 'STK Terrain Sample',
-    description: 'Cesium quantized-mesh sample terrain',
-  },
-  tileset: {
-    url: 'https://assets.cesium.com/43978/tileset.json',
-    name: 'Cesium OSM Buildings',
-    description: 'Sample 3D tileset URL',
-  },
-  imagery: {
-    url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-    name: 'OpenStreetMap',
-    description: 'URL Template imagery',
-  },
-};
-
 const resourceTabs: Array<{ kind: ResourceKind; label: string }> = [
   { kind: 'terrain', label: 'Terrain' },
   { kind: 'tileset', label: '3D Tiles' },
@@ -383,6 +365,12 @@ export default function App() {
       <section className="viewer-wrap">
         <ViewerContainer onReady={handleViewerReady} />
 
+        {slideShowState.currentSlide ? (
+          <div className="slideshow-title-banner" aria-live="polite">
+            <strong>{slideShowState.currentSlide.name}</strong>
+          </div>
+        ) : null}
+
         <aside
           className={sidebarOpen ? 'panel panel-overlay is-open' : 'panel panel-overlay'}
           aria-label="Resource controls"
@@ -430,9 +418,6 @@ export default function App() {
                     <button onClick={loadAll}>Load All</button>
                     <button onClick={clearAll} className="secondary">
                       Clear All
-                    </button>
-                    <button onClick={() => setInputs(sampleInputs)} className="secondary">
-                      Sample Input
                     </button>
                   </div>
 

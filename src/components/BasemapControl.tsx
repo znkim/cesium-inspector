@@ -7,6 +7,11 @@ interface BasemapControlProps {
 
 const basemapOptions: Array<{ id: BasemapId; label: string; description: string }> = [
   {
+    id: 'cesium-bing',
+    label: 'Cesium Bing Aerial',
+    description: 'Cesium world imagery satellite basemap',
+  },
+  {
     id: 'osm',
     label: 'OpenStreetMap',
     description: 'Standard OSM raster tiles',

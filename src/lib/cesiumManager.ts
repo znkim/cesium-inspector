@@ -19,6 +19,7 @@ import {
   UrlTemplateImageryProvider,
   Viewer,
   WebMapTileServiceImageryProvider,
+  createWorldImageryAsync,
   type ImageryProvider,
 } from 'cesium';
 import type { BasemapId, MeasurementMetric, MeasurementState, MeasurementTool } from '../types/resources';
@@ -70,25 +71,29 @@ function createImageryProvider(url: string): ImageryProvider {
   });
 }
 
-function createBasemapProvider(basemap: BasemapId): ImageryProvider {
+function createBasemapProvider(basemap: BasemapId): Promise<ImageryProvider> {
+  if (basemap === 'cesium-bing') {
+    return createWorldImageryAsync();
+  }
+
   if (basemap === 'carto-light') {
-    return new UrlTemplateImageryProvider({
+    return Promise.resolve(new UrlTemplateImageryProvider({
       url: 'https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
       credit: 'OpenStreetMap contributors, CARTO',
-    });
+    }));
   }
 
   if (basemap === 'carto-dark') {
-    return new UrlTemplateImageryProvider({
+    return Promise.resolve(new UrlTemplateImageryProvider({
       url: 'https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
       credit: 'OpenStreetMap contributors, CARTO',
-    });
+    }));
   }
 
-  return new UrlTemplateImageryProvider({
+  return Promise.resolve(new UrlTemplateImageryProvider({
     url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
     credit: 'OpenStreetMap contributors',
-  });
+  }));
 }
 
 function formatDistance(meters: number): string {
@@ -158,6 +163,8 @@ export class CesiumManager {
   private imageryLayer: ImageryLayer | null = null;
 
   private basemapLayer: ImageryLayer | null = null;
+
+  private basemapLoadToken = 0;
 
   private measurementTool: MeasurementTool | null = null;
 
@@ -254,15 +261,21 @@ export class CesiumManager {
     this.notifyMeasurementListeners();
   }
 
-  setBasemap(basemap: BasemapId): void {
+  async setBasemap(basemap: BasemapId): Promise<void> {
     if (this.basemap === basemap && this.basemapLayer) return;
+
+    const token = ++this.basemapLoadToken;
 
     if (this.basemapLayer) {
       this.viewer.imageryLayers.remove(this.basemapLayer, true);
       this.basemapLayer = null;
     }
 
-    const provider = createBasemapProvider(basemap);
+    const provider = await createBasemapProvider(basemap);
+    if (token !== this.basemapLoadToken) {
+      return;
+    }
+
     this.basemapLayer = this.viewer.imageryLayers.addImageryProvider(provider, 0);
     this.basemap = basemap;
   }

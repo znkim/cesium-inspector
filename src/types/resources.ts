@@ -1,5 +1,5 @@
 export type ResourceKind = 'terrain' | 'tileset' | 'imagery';
-export type BasemapId = 'osm' | 'carto-light' | 'carto-dark';
+export type BasemapId = 'osm' | 'carto-light' | 'carto-dark' | 'cesium-bing';
 export type MeasurementTool = 'distance' | 'angle' | 'height' | 'radius' | 'area';
 
 export interface ResourceInput {

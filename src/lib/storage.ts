@@ -59,7 +59,7 @@ export function saveThemePreference(theme: ThemePreference): void {
 
 export function loadBasemapPreference(): BasemapId {
   const raw = localStorage.getItem(BASEMAP_STORAGE_KEY);
-  if (raw === 'osm' || raw === 'carto-light' || raw === 'carto-dark') return raw;
+  if (raw === 'osm' || raw === 'carto-light' || raw === 'carto-dark' || raw === 'cesium-bing') return raw;
   return defaultBasemap;
 }
 

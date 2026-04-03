@@ -1,11 +1,31 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import ViewerContainer from './components/ViewerContainer';
 import ResourceForm from './components/ResourceForm';
-import LayerStatusPanel from './components/LayerStatusPanel';
-import type { AppInputs, LoadedLayerInfo, ResourceKind } from './types/resources';
-import { defaultInputs, loadInputs, saveInputs } from './lib/storage';
+import BasemapControl from './components/BasemapControl';
+import MeasurementControl from './components/MeasurementControl';
+import ThemeControl from './components/ThemeControl';
+import type {
+  AppInputs,
+  BasemapId,
+  MeasurementState,
+  MeasurementTool,
+  RecentResourceEntry,
+  ResourceKind,
+} from './types/resources';
+import {
+  addRecentResource,
+  defaultBasemap,
+  defaultInputs,
+  loadBasemapPreference,
+  loadInputs,
+  loadRecentResources,
+  loadThemePreference,
+  saveBasemapPreference,
+  saveInputs,
+  saveThemePreference,
+  type ThemePreference,
+} from './lib/storage';
 import { CesiumManager } from './lib/cesiumManager';
-import { getDisplayLayerName } from './lib/layerNaming';
 
 interface LoadingMap {
   terrain: boolean;
@@ -37,12 +57,28 @@ const sampleInputs: AppInputs = {
   },
 };
 
+const resourceTabs: Array<{ kind: ResourceKind; label: string }> = [
+  { kind: 'terrain', label: 'Terrain' },
+  { kind: 'tileset', label: '3D Tiles' },
+  { kind: 'imagery', label: 'Imagery' },
+];
+
+const resourceLabels: Record<ResourceKind, string> = {
+  terrain: 'Terrain',
+  tileset: '3D Tiles',
+  imagery: 'Imagery',
+};
+
+const idleMeasurementState: MeasurementState = {
+  tool: null,
+  instruction: 'Choose a measurement tool.',
+  pointCount: 0,
+  isComplete: false,
+  metrics: [],
+};
+
 export default function App() {
   const [manager, setManager] = useState<CesiumManager | null>(null);
-
-  const handleViewerReady = useCallback((nextManager: CesiumManager | null) => {
-    setManager(nextManager);
-  }, []);
   const [inputs, setInputs] = useState<AppInputs>(defaultInputs);
   const [loading, setLoading] = useState<LoadingMap>({
     terrain: false,
@@ -51,10 +87,28 @@ export default function App() {
   });
   const [errors, setErrors] = useState<ErrorMap>({});
   const [ready, setReady] = useState(false);
+  const [themePreference, setThemePreference] = useState<ThemePreference>('system');
+  const [systemPrefersDark, setSystemPrefersDark] = useState(false);
+  const [basemap, setBasemap] = useState<BasemapId>(defaultBasemap);
+  const [measurementState, setMeasurementState] = useState<MeasurementState>(idleMeasurementState);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [activeResourceTab, setActiveResourceTab] = useState<ResourceKind>('terrain');
+  const [recentResources, setRecentResources] = useState<Record<ResourceKind, RecentResourceEntry[]>>({
+    terrain: [],
+    tileset: [],
+    imagery: [],
+  });
+
+  const handleViewerReady = useCallback((nextManager: CesiumManager | null) => {
+    setManager(nextManager);
+  }, []);
 
   useEffect(() => {
     const restored = loadInputs();
     setInputs(restored);
+    setRecentResources(loadRecentResources());
+    setThemePreference(loadThemePreference());
+    setBasemap(loadBasemapPreference());
     setReady(true);
   }, []);
 
@@ -63,40 +117,58 @@ export default function App() {
     saveInputs(inputs);
   }, [ready, inputs]);
 
-  const loadedLayers = useMemo<LoadedLayerInfo[]>(() => {
-    if (!manager) return [];
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    const updatePreference = (event?: MediaQueryListEvent) => {
+      setSystemPrefersDark(event?.matches ?? mediaQuery.matches);
+    };
 
-    const active = manager.active;
-    const layers: LoadedLayerInfo[] = [];
-    const fallbackIndex = { terrain: 1, tileset: 1, imagery: 1 };
+    updatePreference();
+    mediaQuery.addEventListener('change', updatePreference);
+    return () => mediaQuery.removeEventListener('change', updatePreference);
+  }, []);
 
-    if (active.terrainUrl) {
-      layers.push({
-        kind: 'terrain',
-        name: getDisplayLayerName('terrain', inputs.terrain, active.terrainUrl, fallbackIndex.terrain++),
-        description: inputs.terrain.description,
-        url: active.terrainUrl,
-      });
-    }
-    if (active.tilesetUrl) {
-      layers.push({
-        kind: 'tileset',
-        name: getDisplayLayerName('tileset', inputs.tileset, active.tilesetUrl, fallbackIndex.tileset++),
-        description: inputs.tileset.description,
-        url: active.tilesetUrl,
-      });
-    }
-    if (active.imageryUrl) {
-      layers.push({
-        kind: 'imagery',
-        name: getDisplayLayerName('imagery', inputs.imagery, active.imageryUrl, fallbackIndex.imagery++),
-        description: inputs.imagery.description,
-        url: active.imageryUrl,
-      });
+  useEffect(() => {
+    if (!ready) return;
+    saveThemePreference(themePreference);
+  }, [ready, themePreference]);
+
+  useEffect(() => {
+    if (!ready) return;
+    saveBasemapPreference(basemap);
+  }, [basemap, ready]);
+
+  const resolvedTheme = themePreference === 'system' ? (systemPrefersDark ? 'dark' : 'light') : themePreference;
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = resolvedTheme;
+  }, [resolvedTheme]);
+
+  useEffect(() => {
+    if (!manager) return;
+    manager.setBasemap(basemap);
+  }, [basemap, manager]);
+
+  useEffect(() => {
+    if (!manager) {
+      setMeasurementState(idleMeasurementState);
+      return;
     }
 
-    return layers;
-  }, [inputs, manager]);
+    return manager.subscribeMeasurement(setMeasurementState);
+  }, [manager]);
+
+  useEffect(() => {
+    if (!manager || !measurementState.tool) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      manager.stopMeasurement();
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [manager, measurementState.tool]);
 
   const setInput = useCallback((kind: ResourceKind, patch: Partial<AppInputs[ResourceKind]>) => {
     setInputs((prev) => ({
@@ -109,13 +181,16 @@ export default function App() {
   }, []);
 
   const runAction = useCallback(
-    async (kind: ResourceKind, action: () => Promise<void> | void) => {
+    async (kind: ResourceKind, action: () => Promise<void> | void, recentResource?: AppInputs[ResourceKind]) => {
       if (!manager) return;
       setLoading((prev) => ({ ...prev, [kind]: true }));
       setErrors((prev) => ({ ...prev, [kind]: undefined }));
 
       try {
         await action();
+        if (recentResource) {
+          setRecentResources(addRecentResource(kind, recentResource));
+        }
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Unknown error';
         setErrors((prev) => ({ ...prev, [kind]: message }));
@@ -130,15 +205,16 @@ export default function App() {
     async (kind: ResourceKind) => {
       if (!manager) return;
       const url = inputs[kind].url;
+      const recentResource = inputs[kind];
 
       if (kind === 'terrain') {
-        await runAction(kind, () => manager.loadTerrain(url));
+        await runAction(kind, () => manager.loadTerrain(url), recentResource);
       }
       if (kind === 'tileset') {
-        await runAction(kind, () => manager.loadTileset(url));
+        await runAction(kind, () => manager.loadTileset(url), recentResource);
       }
       if (kind === 'imagery') {
-        await runAction(kind, () => manager.loadImagery(url));
+        await runAction(kind, () => manager.loadImagery(url), recentResource);
       }
     },
     [inputs, manager, runAction],
@@ -177,63 +253,143 @@ export default function App() {
     setInputs(defaultInputs);
   }, [manager]);
 
+  const startMeasurement = useCallback(
+    (tool: MeasurementTool) => {
+      if (!manager) return;
+      if (measurementState.tool) return;
+      manager.startMeasurement(tool);
+    },
+    [manager, measurementState.tool],
+  );
+
+  const stopMeasurement = useCallback(() => {
+    if (!manager) return;
+    manager.stopMeasurement();
+  }, [manager]);
+
+  const applyRecentResource = useCallback(
+    (kind: ResourceKind, entry: RecentResourceEntry) => {
+      setActiveResourceTab(kind);
+      setInputs((prev) => ({
+        ...prev,
+        [kind]: {
+          url: entry.url,
+          name: entry.name ?? '',
+          description: entry.description ?? '',
+        },
+      }));
+
+      if (!manager) return;
+      void runAction(
+        kind,
+        () => {
+          if (kind === 'terrain') return manager.loadTerrain(entry.url);
+          if (kind === 'tileset') return manager.loadTileset(entry.url);
+          return manager.loadImagery(entry.url);
+        },
+        {
+          url: entry.url,
+          name: entry.name ?? '',
+          description: entry.description ?? '',
+        },
+      );
+    },
+    [manager, runAction],
+  );
+
   return (
     <main className="app-layout">
-      <aside className="panel">
-        <h2>Cesium Resource Tester</h2>
-        <p className="muted">URL 입력 후 개별 Load 또는 Load All로 즉시 시각화합니다.</p>
-
-        <div className="row">
-          <button onClick={loadAll}>Load All</button>
-          <button onClick={clearAll} className="secondary">
-            Clear All
-          </button>
-          <button onClick={() => setInputs(sampleInputs)} className="secondary">
-            샘플 입력
-          </button>
-        </div>
-
-        <ResourceForm
-          kind="terrain"
-          input={inputs.terrain}
-          loading={loading.terrain}
-          error={errors.terrain}
-          onChange={(patch) => setInput('terrain', patch)}
-          onLoad={() => {
-            void loadByKind('terrain');
-          }}
-          onRemove={() => removeByKind('terrain')}
-        />
-
-        <ResourceForm
-          kind="tileset"
-          input={inputs.tileset}
-          loading={loading.tileset}
-          error={errors.tileset}
-          onChange={(patch) => setInput('tileset', patch)}
-          onLoad={() => {
-            void loadByKind('tileset');
-          }}
-          onRemove={() => removeByKind('tileset')}
-        />
-
-        <ResourceForm
-          kind="imagery"
-          input={inputs.imagery}
-          loading={loading.imagery}
-          error={errors.imagery}
-          onChange={(patch) => setInput('imagery', patch)}
-          onLoad={() => {
-            void loadByKind('imagery');
-          }}
-          onRemove={() => removeByKind('imagery')}
-        />
-
-      </aside>
-
       <section className="viewer-wrap">
         <ViewerContainer onReady={handleViewerReady} />
-        <LayerStatusPanel layers={loadedLayers} />
+
+        <aside
+          className={sidebarOpen ? 'panel panel-overlay is-open' : 'panel panel-overlay'}
+          aria-label="Resource controls"
+        >
+          <button
+            type="button"
+            className="panel-toggle"
+            onClick={() => setSidebarOpen((prev) => !prev)}
+            aria-expanded={sidebarOpen}
+            aria-controls="resource-panel-content"
+            aria-label={sidebarOpen ? 'Collapse resource panel' : 'Expand resource panel'}
+          >
+            <span aria-hidden="true">{sidebarOpen ? '<' : '>'}</span>
+          </button>
+
+          <div id="resource-panel-content" className="panel-content">
+            <div className="panel-header">
+              <div>
+                <h2>Cesium Resource Tester</h2>
+                <p className="muted">Enter resource URLs, then load each layer individually or all at once.</p>
+              </div>
+            </div>
+
+            <div className="row">
+              <button onClick={loadAll}>Load All</button>
+              <button onClick={clearAll} className="secondary">
+                Clear All
+              </button>
+              <button onClick={() => setInputs(sampleInputs)} className="secondary">
+                Sample Input
+              </button>
+            </div>
+
+            <div className="resource-segmented-control" role="tablist" aria-label="Resource type">
+              {resourceTabs.map((tab) => (
+                <button
+                  key={tab.kind}
+                  type="button"
+                  role="tab"
+                  className={tab.kind === activeResourceTab ? 'resource-segment is-active' : 'resource-segment'}
+                  aria-selected={tab.kind === activeResourceTab}
+                  onClick={() => setActiveResourceTab(tab.kind)}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            <ResourceForm
+              kind={activeResourceTab}
+              input={inputs[activeResourceTab]}
+              loading={loading[activeResourceTab]}
+              error={errors[activeResourceTab]}
+              onChange={(patch) => setInput(activeResourceTab, patch)}
+              onLoad={() => {
+                void loadByKind(activeResourceTab);
+              }}
+              onRemove={() => removeByKind(activeResourceTab)}
+            />
+
+            <section className="recent-resource-panel" aria-label={`${resourceLabels[activeResourceTab]} recent resources`}>
+              <div className="recent-resource-header">
+                <h3>Recent {resourceLabels[activeResourceTab]}</h3>
+                <small>{recentResources[activeResourceTab].length} saved</small>
+              </div>
+              {recentResources[activeResourceTab].length === 0 ? (
+                <p className="muted recent-resource-empty">No recent resources yet.</p>
+              ) : (
+                <div className="recent-resource-list">
+                  {recentResources[activeResourceTab].slice(0, 4).map((entry) => (
+                    <button
+                      key={`${activeResourceTab}:${entry.url}`}
+                      type="button"
+                      className="recent-resource-item"
+                      onClick={() => applyRecentResource(activeResourceTab, entry)}
+                    >
+                      <strong>{entry.name?.trim() || entry.url}</strong>
+                      <span>{entry.url}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </section>
+          </div>
+        </aside>
+        <MeasurementControl state={measurementState} onStart={startMeasurement} onStop={stopMeasurement} />
+        <ThemeControl value={themePreference} onChange={setThemePreference} />
+        <BasemapControl value={basemap} onChange={setBasemap} />
       </section>
     </main>
   );

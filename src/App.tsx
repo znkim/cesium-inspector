@@ -3,6 +3,7 @@ import ViewerContainer from './components/ViewerContainer';
 import ResourceForm from './components/ResourceForm';
 import BasemapControl from './components/BasemapControl';
 import MeasurementControl from './components/MeasurementControl';
+import SlideShowControl from './components/SlideShowControl';
 import ThemeControl from './components/ThemeControl';
 import type {
   AppInputs,
@@ -11,6 +12,7 @@ import type {
   MeasurementTool,
   RecentResourceEntry,
   ResourceKind,
+  SlideShowState,
 } from './types/resources';
 import {
   addRecentResource,
@@ -26,6 +28,7 @@ import {
   type ThemePreference,
 } from './lib/storage';
 import { CesiumManager } from './lib/cesiumManager';
+import { CesiumSlideShow } from './lib/cesiumSlideShow';
 
 interface LoadingMap {
   terrain: boolean;
@@ -69,6 +72,13 @@ const resourceLabels: Record<ResourceKind, string> = {
   imagery: 'Imagery',
 };
 
+const sidebarTabs = [
+  { id: 'resources', label: 'Resources' },
+  { id: 'slideshow', label: '3D Slide Show' },
+] as const;
+
+type SidebarTabId = (typeof sidebarTabs)[number]['id'];
+
 const idleMeasurementState: MeasurementState = {
   tool: null,
   instruction: 'Choose a measurement tool.',
@@ -77,8 +87,16 @@ const idleMeasurementState: MeasurementState = {
   metrics: [],
 };
 
+const idleSlideShowState: SlideShowState = {
+  slides: [],
+  currentIndex: -1,
+  currentSlide: null,
+  isPlaying: false,
+};
+
 export default function App() {
   const [manager, setManager] = useState<CesiumManager | null>(null);
+  const [slideShow, setSlideShow] = useState<CesiumSlideShow | null>(null);
   const [inputs, setInputs] = useState<AppInputs>(defaultInputs);
   const [loading, setLoading] = useState<LoadingMap>({
     terrain: false,
@@ -92,7 +110,9 @@ export default function App() {
   const [basemap, setBasemap] = useState<BasemapId>(defaultBasemap);
   const [measurementState, setMeasurementState] = useState<MeasurementState>(idleMeasurementState);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [activeSidebarTab, setActiveSidebarTab] = useState<SidebarTabId>('resources');
   const [activeResourceTab, setActiveResourceTab] = useState<ResourceKind>('terrain');
+  const [slideShowState, setSlideShowState] = useState<SlideShowState>(idleSlideShowState);
   const [recentResources, setRecentResources] = useState<Record<ResourceKind, RecentResourceEntry[]>>({
     terrain: [],
     tileset: [],
@@ -169,6 +189,26 @@ export default function App() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [manager, measurementState.tool]);
+
+  useEffect(() => {
+    if (!manager) {
+      setSlideShow(null);
+      setSlideShowState(idleSlideShowState);
+      return;
+    }
+
+    const nextSlideShow = new CesiumSlideShow(manager.getViewer(), {
+      storageKey: 'cesium-inspector:slideshow',
+    });
+
+    setSlideShow(nextSlideShow);
+    const unsubscribe = nextSlideShow.subscribe(setSlideShowState);
+
+    return () => {
+      unsubscribe();
+      nextSlideShow.stopSlideShow();
+    };
+  }, [manager]);
 
   const setInput = useCallback((kind: ResourceKind, patch: Partial<AppInputs[ResourceKind]>) => {
     setInputs((prev) => ({
@@ -297,6 +337,47 @@ export default function App() {
     [manager, runAction],
   );
 
+  const addSlide = useCallback(
+    (name: string) => {
+      if (!slideShow) return;
+      slideShow.recordLocation(name);
+    },
+    [slideShow],
+  );
+
+  const startSlideShow = useCallback(() => {
+    if (!slideShow) return;
+    const startIndex = slideShowState.currentIndex >= 0 ? slideShowState.currentIndex : 0;
+    void slideShow.startSlideShow({ startIndex });
+  }, [slideShow, slideShowState.currentIndex]);
+
+  const stopSlideShow = useCallback(() => {
+    if (!slideShow) return;
+    slideShow.stopSlideShow();
+  }, [slideShow]);
+
+  const selectSlide = useCallback(
+    (index: number) => {
+      if (!slideShow) return;
+      if (slideShowState.isPlaying) {
+        slideShow.stopSlideShow();
+      }
+      void slideShow.goToSlide(index);
+    },
+    [slideShow, slideShowState.isPlaying],
+  );
+
+  const deleteSlide = useCallback(
+    (index: number) => {
+      if (!slideShow) return;
+      if (slideShowState.isPlaying) {
+        slideShow.stopSlideShow();
+      }
+      slideShow.removeSlide(index);
+    },
+    [slideShow, slideShowState.isPlaying],
+  );
+
   return (
     <main className="app-layout">
       <section className="viewer-wrap">
@@ -321,70 +402,105 @@ export default function App() {
             <div className="panel-header">
               <div>
                 <h2>Cesium Resource Tester</h2>
-                <p className="muted">Enter resource URLs, then load each layer individually or all at once.</p>
+                <p className="muted">
+                  Switch between resource loading and 3D slide show controls from the same panel.
+                </p>
               </div>
             </div>
 
-            <div className="row">
-              <button onClick={loadAll}>Load All</button>
-              <button onClick={clearAll} className="secondary">
-                Clear All
-              </button>
-              <button onClick={() => setInputs(sampleInputs)} className="secondary">
-                Sample Input
-              </button>
-            </div>
-
-            <div className="resource-segmented-control" role="tablist" aria-label="Resource type">
-              {resourceTabs.map((tab) => (
+            <div className="sidebar-segmented-control" role="tablist" aria-label="Main panel section">
+              {sidebarTabs.map((tab) => (
                 <button
-                  key={tab.kind}
+                  key={tab.id}
                   type="button"
                   role="tab"
-                  className={tab.kind === activeResourceTab ? 'resource-segment is-active' : 'resource-segment'}
-                  aria-selected={tab.kind === activeResourceTab}
-                  onClick={() => setActiveResourceTab(tab.kind)}
+                  className={tab.id === activeSidebarTab ? 'sidebar-segment is-active' : 'sidebar-segment'}
+                  aria-selected={tab.id === activeSidebarTab}
+                  onClick={() => setActiveSidebarTab(tab.id)}
                 >
                   {tab.label}
                 </button>
               ))}
             </div>
 
-            <ResourceForm
-              kind={activeResourceTab}
-              input={inputs[activeResourceTab]}
-              loading={loading[activeResourceTab]}
-              error={errors[activeResourceTab]}
-              onChange={(patch) => setInput(activeResourceTab, patch)}
-              onLoad={() => {
-                void loadByKind(activeResourceTab);
-              }}
-              onRemove={() => removeByKind(activeResourceTab)}
-            />
-
-            <section className="recent-resource-panel" aria-label={`${resourceLabels[activeResourceTab]} recent resources`}>
-              <div className="recent-resource-header">
-                <h3>Recent {resourceLabels[activeResourceTab]}</h3>
-                <small>{recentResources[activeResourceTab].length} saved</small>
-              </div>
-              {recentResources[activeResourceTab].length === 0 ? (
-                <p className="muted recent-resource-empty">No recent resources yet.</p>
-              ) : (
-                <div className="recent-resource-list">
-                  {recentResources[activeResourceTab].slice(0, 4).map((entry) => (
-                    <button
-                      key={`${activeResourceTab}:${entry.url}`}
-                      type="button"
-                      className="recent-resource-item"
-                      onClick={() => applyRecentResource(activeResourceTab, entry)}
-                    >
-                      <strong>{entry.name?.trim() || entry.url}</strong>
-                      <span>{entry.url}</span>
+            <div className="panel-body">
+              {activeSidebarTab === 'resources' ? (
+                <>
+                  <div className="row">
+                    <button onClick={loadAll}>Load All</button>
+                    <button onClick={clearAll} className="secondary">
+                      Clear All
                     </button>
-                  ))}
-                </div>
+                    <button onClick={() => setInputs(sampleInputs)} className="secondary">
+                      Sample Input
+                    </button>
+                  </div>
+
+                  <div className="resource-segmented-control" role="tablist" aria-label="Resource type">
+                    {resourceTabs.map((tab) => (
+                      <button
+                        key={tab.kind}
+                        type="button"
+                        role="tab"
+                        className={tab.kind === activeResourceTab ? 'resource-segment is-active' : 'resource-segment'}
+                        aria-selected={tab.kind === activeResourceTab}
+                        onClick={() => setActiveResourceTab(tab.kind)}
+                      >
+                        {tab.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  <ResourceForm
+                    kind={activeResourceTab}
+                    input={inputs[activeResourceTab]}
+                    loading={loading[activeResourceTab]}
+                    error={errors[activeResourceTab]}
+                    onChange={(patch) => setInput(activeResourceTab, patch)}
+                    onLoad={() => {
+                      void loadByKind(activeResourceTab);
+                    }}
+                    onRemove={() => removeByKind(activeResourceTab)}
+                  />
+
+                  <section
+                    className="recent-resource-panel"
+                    aria-label={`${resourceLabels[activeResourceTab]} recent resources`}
+                  >
+                    <div className="recent-resource-header">
+                      <h3>Recent {resourceLabels[activeResourceTab]}</h3>
+                      <small>{recentResources[activeResourceTab].length} saved</small>
+                    </div>
+                    {recentResources[activeResourceTab].length === 0 ? (
+                      <p className="muted recent-resource-empty">No recent resources yet.</p>
+                    ) : (
+                      <div className="recent-resource-list">
+                        {recentResources[activeResourceTab].slice(0, 4).map((entry) => (
+                          <button
+                            key={`${activeResourceTab}:${entry.url}`}
+                            type="button"
+                            className="recent-resource-item"
+                            onClick={() => applyRecentResource(activeResourceTab, entry)}
+                          >
+                            <strong>{entry.name?.trim() || entry.url}</strong>
+                            <span>{entry.url}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </section>
+                </>
+              ) : (
+                <SlideShowControl
+                  state={slideShowState}
+                  onAdd={addSlide}
+                  onStart={startSlideShow}
+                  onStop={stopSlideShow}
+                  onSelect={selectSlide}
+                  onDelete={deleteSlide}
+                />
               )}
-            </section>
+            </div>
           </div>
         </aside>
         <MeasurementControl state={measurementState} onStart={startMeasurement} onStop={stopMeasurement} />

@@ -201,6 +201,10 @@ export class CesiumManager {
     };
   }
 
+  getViewer(): Viewer {
+    return this.viewer;
+  }
+
   subscribeMeasurement(listener: MeasurementListener): () => void {
     this.measurementListeners.add(listener);
     listener(this.getMeasurementState());

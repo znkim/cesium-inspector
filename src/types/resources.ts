@@ -30,3 +30,32 @@ export interface MeasurementState {
   isComplete: boolean;
   metrics: MeasurementMetric[];
 }
+
+export interface SlideDestination {
+  lon: number;
+  lat: number;
+  height: number;
+}
+
+export interface SlideOrientation {
+  heading: number;
+  pitch: number;
+  roll: number;
+}
+
+export interface SlideRecord {
+  id: string;
+  name: string;
+  destination: SlideDestination;
+  orientation: SlideOrientation;
+  duration: number;
+  pause: number;
+  createdAt: string;
+}
+
+export interface SlideShowState {
+  slides: SlideRecord[];
+  currentIndex: number;
+  currentSlide: SlideRecord | null;
+  isPlaying: boolean;
+}
